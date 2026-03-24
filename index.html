@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plac Odpadów</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f0f0f; color: #e8e8e8; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+    import React, { createElement as h, useState, useEffect, useRef } from 'https://esm.sh/react@18';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { getDatabase, ref, onValue, set, push } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+    // ============================================================
+    // FIREBASE CONFIG
+    // ============================================================
+    const firebaseConfig = {
+      apiKey: "AIzaSyAP6SIQUkMqw_doUZhpNy-pJEjWfZx1a2o",
+      authDomain: "plac-odpadow.firebaseapp.com",
+      databaseURL: "https://plac-odpadow-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "plac-odpadow",
+      storageBucket: "plac-odpadow.firebasestorage.app",
+      messagingSenderId: "203731223327",
+      appId: "1:203731223327:web:3673fc30324ae643e6262a"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // ============================================================
+    // DANE
+    // ============================================================
+    const KONTENERY = ["Karton #1","Karton #2","Folia #1","Ocynk #1","Ocynk #2","Stal #1","Wełna mineralna #1","Skrzynie metalowe #1","Styropian #1","Plastik #1","Odpady drewniane #1","Odpady drewniane #2","Pianka+plastik #1","Metal z lodówek #1","Metal mix #1","Plastik komory #1","Szkło #1","Chrom #1","AGD (złom) #1"];
+    const WORKI = ["Aluminium z fabryki lodówek #1","Aluminium z fabryki lodówek #2","Aluminium z fabryki piekarników #1","Elektronika (e-waste) #1","Elektronika (e-waste) #2","Guma #1"];
+    const STREFY = ["Kontenery","Worki na odpady","Kartony na odpady niebezpieczne","Drzwi i obudowy lodówek","Miejsce paletyzacji drzwi i obudów lodówek","Sklejone arkusze metalu","Miejsce na puste beczki","Miejsce na pojemniki plastikowe (uszkodzone)","Drobne odpady","Palety małe spakowane","Palety euro","Palety zwykłe","Butle gazowe","Miejsce na odpady drewniane"];
+    const STATUSY = ["wolny","zapełnia się","pełny","w wymianie"];
+
+    const now = () => new Date().toLocaleString("pl-PL");
+
+    const pctColor = (p) => {
+      if (p == null) return "#555";
+      if (p >= 100) return "#ef4444";
+      if (p >= 80) return "#f97316";
+      if (p >= 60) return "#eab308";
+      return "#22c55e";
+    };
+
+    // ============================================================
+    // STYLES
+    // ============================================================
+    const css = {
+      app: { minHeight:"100vh", background:"#0f0f0f", color:"#e8e8e8", fontFamily:"'Inter',sans-serif", fontSize:"15px" },
+      topbar: { background:"#1a1a1a", borderBottom:"1px solid #2a2a2a", padding:"0 16px", display:"flex", alignItems:"center", gap:"6px", height:"56px", position:"sticky", top:0, zIndex:100, overflowX:"auto" },
+      logo: { color:"#22c55e", fontWeight:"700", fontSize:"15px", letterSpacing:"2px", whiteSpace:"nowrap", marginRight:"12px" },
+      main: { padding:"20px", maxWidth:"1400px", margin:"0 auto" },
+      card: { background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:"10px", padding:"16px", marginBottom:"12px" },
+      h2: { fontSize:"18px", fontWeight:"700", marginBottom:"18px" },
+      grid: { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"12px" },
+      input: { background:"#111", border:"1px solid #333", borderRadius:"6px", color:"#e8e8e8", padding:"8px 12px", fontFamily:"inherit", fontSize:"14px", width:"100%", boxSizing:"border-box" },
+      select: { background:"#111", border:"1px solid #333", borderRadius:"6px", color:"#e8e8e8", padding:"8px 12px", fontFamily:"inherit", fontSize:"14px", width:"100%", boxSizing:"border-box" },
+      btn: (c="#22c55e") => ({ background:`${c}22`, border:`1px solid ${c}`, borderRadius:"6px", color:c, padding:"8px 16px", cursor:"pointer", fontFamily:"inherit", fontSize:"14px", fontWeight:"600" }),
+      tag: (c) => ({ display:"inline-block", padding:"3px 9px", borderRadius:"4px", fontSize:"12px", fontWeight:"700", background:`${c}22`, color:c, border:`1px solid ${c}44` }),
+      modal: { position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"16px" },
+      modalBox: { background:"#1a1a1a", border:"1px solid #333", borderRadius:"12px", padding:"24px", width:"100%", maxWidth:"460px", maxHeight:"90vh", overflowY:"auto" },
+      label: { fontSize:"13px", color:"#888", marginBottom:"6px" },
+      navBtn: (a) => ({ padding:"7px 14px", borderRadius:"6px", border: a?"1px solid #22c55e":"1px solid #2a2a2a", background: a?"rgba(34,197,94,0.15)":"transparent", color: a?"#22c55e":"#999", cursor:"pointer", fontSize:"13px", fontFamily:"inherit", whiteSpace:"nowrap", fontWeight: a?"600":"400" }),
+    };
+
+    // ============================================================
+    // COMPONENTS
+    // ============================================================
+    function Bar({pct}) {
+      const c = pctColor(pct);
+      return h('div',{style:{height:"6px",borderRadius:"3px",background:"#2a2a2a",marginTop:"6px",overflow:"hidden"}},
+        h('div',{style:{height:"100%",width:`${Math.min(pct||0,100)}%`,background:c,borderRadius:"3px",transition:"width 0.3s"}})
+      );
+    }
+
+    function Modal({open,onClose,title,children}) {
+      if(!open) return null;
+      return h('div',{style:css.modal,onClick:onClose},
+        h('div',{style:css.modalBox,onClick:e=>e.stopPropagation()},
+          h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
+            h('div',{style:{fontWeight:"700"}},title),
+            h('button',{style:css.btn("#666"),onClick:onClose},"✕")
+          ),
+          children
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 1 — KONTENERY
+    // ============================================================
+    function Kontenery({data,onUpdate}) {
+      const [modal,setModal] = useState(null);
+      const [pct,setPct] = useState("");
+      const [status,setStatus] = useState("wolny");
+
+      const open = (i) => { const d=data[i]||{}; setPct(d.pct??""); setStatus(d.status||"wolny"); setModal(i); };
+      const handleStatus = (s) => {
+        setStatus(s);
+        if(s==="pełny") setPct(100);
+        if(s==="wolny") setPct(0);
+      };
+      const save = () => {
+        const p=parseInt(pct);
+        onUpdate(modal,{pct:isNaN(p)?null:Math.min(100,Math.max(0,p)),status,updated:now()});
+        setModal(null);
+      };
+
+      return h('div',null,
+        h('div',{style:css.h2},"📦 KONTENERY ("+KONTENERY.length+" szt.)"),
+        h('div',{style:css.grid},
+          KONTENERY.map((name,i)=>{
+            const d=data[i]||{};
+            const c=pctColor(d.pct);
+            return h('div',{key:i,onClick:()=>open(i),style:{...css.card,cursor:"pointer",borderColor:`${c}44`,background:`${c}11`,marginBottom:0}},
+              h('div',{style:{fontWeight:"600",marginBottom:"6px",fontSize:"14px"}},name),
+              h('div',{style:{display:"flex",gap:"6px",alignItems:"center"}},
+                h('span',{style:css.tag(c)},`${d.pct??'—'}%`),
+                d.status&&h('span',{style:css.tag("#555")},d.status)
+              ),
+              h(Bar,{pct:d.pct}),
+              h('div',{style:{color:"#555",fontSize:"12px",marginTop:"4px"}},d.updated||"—")
+            );
+          })
+        ),
+        h(Modal,{open:modal!==null,onClose:()=>setModal(null),title:KONTENERY[modal]},
+          h('div',{style:{marginBottom:"12px"}},
+            h('div',{style:css.label},"Poziom wypełnienia (%)"),
+            h('input',{style:css.input,type:"number",min:0,max:100,value:pct,onChange:e=>setPct(e.target.value)})
+          ),
+          h('div',{style:{marginBottom:"16px"}},
+            h('div',{style:css.label},"Status"),
+            h('select',{style:css.select,value:status,onChange:e=>handleStatus(e.target.value)},
+              STATUSY.map(s=>h('option',{key:s},s))
+            )
+          ),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 2 — WORKI
+    // ============================================================
+    function Worki({data,onUpdate}) {
+      const [modal,setModal] = useState(null);
+      const [pct,setPct] = useState("");
+      const [status,setStatus] = useState("wolny");
+
+      const open = (i) => { const d=data[i]||{}; setPct(d.pct??""); setStatus(d.status||"wolny"); setModal(i); };
+      const handleStatus = (s) => {
+        setStatus(s);
+        if(s==="pełny") setPct(100);
+        if(s==="wolny") setPct(0);
+      };
+      const save = () => {
+        const p=parseInt(pct);
+        onUpdate(modal,{pct:isNaN(p)?null:Math.min(100,Math.max(0,p)),status,updated:now()});
+        setModal(null);
+      };
+
+      return h('div',null,
+        h('div',{style:css.h2},"🛍️ WORKI NA ODPADY ("+WORKI.length+" szt.)"),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"12px"}},
+          WORKI.map((name,i)=>{
+            const d=data[i]||{};
+            const c=pctColor(d.pct);
+            return h('div',{key:i,onClick:()=>open(i),style:{...css.card,cursor:"pointer",borderColor:`${c}44`,background:`${c}11`,marginBottom:0}},
+              h('div',{style:{fontWeight:"600",marginBottom:"8px",fontSize:"14px"}},name),
+              h('div',{style:{display:"flex",gap:"6px"}},
+                h('span',{style:css.tag(c)},`${d.pct??'—'}%`),
+                d.status&&h('span',{style:css.tag("#555")},d.status)
+              ),
+              h(Bar,{pct:d.pct}),
+              h('div',{style:{color:"#555",fontSize:"12px",marginTop:"4px"}},d.updated||"—")
+            );
+          })
+        ),
+        h(Modal,{open:modal!==null,onClose:()=>setModal(null),title:WORKI[modal]},
+          h('div',{style:{marginBottom:"12px"}},
+            h('div',{style:css.label},"Poziom wypełnienia (%)"),
+            h('input',{style:css.input,type:"number",min:0,max:100,value:pct,onChange:e=>setPct(e.target.value)})
+          ),
+          h('div',{style:{marginBottom:"16px"}},
+            h('div',{style:css.label},"Status"),
+            h('select',{style:css.select,value:status,onChange:e=>handleStatus(e.target.value)},
+              STATUSY.map(s=>h('option',{key:s},s))
+            )
+          ),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 3 — STREFY
+    // ============================================================
+    function Strefy({data,onUpdate}) {
+      const [modal,setModal] = useState(null);
+      const [pct,setPct] = useState("");
+      const [qty,setQty] = useState("");
+      const [comment,setComment] = useState("");
+
+      const open = (i) => { const d=data[i]||{}; setPct(d.pct??""); setQty(d.qty||""); setComment(d.comment||""); setModal(i); };
+      const save = () => {
+        const p=parseInt(pct);
+        onUpdate(modal,{pct:isNaN(p)?null:Math.min(100,Math.max(0,p)),qty,comment,updated:now()});
+        setModal(null);
+      };
+
+      return h('div',null,
+        h('div',{style:css.h2},"🗺️ STREFY PLACU (14 szt.)"),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:"10px"}},
+          STREFY.map((name,i)=>{
+            const d=data[i]||{};
+            const c=pctColor(d.pct);
+            return h('div',{key:i,onClick:()=>open(i),style:{...css.card,cursor:"pointer",borderColor:`${c}44`,background:`${c}11`,marginBottom:0}},
+              h('div',{style:{display:"flex",justifyContent:"space-between",marginBottom:"4px"}},
+                h('div',{style:{fontWeight:"600",fontSize:"12px",flex:1}},name),
+                h('span',{style:css.tag(c)},`${d.pct??'—'}%`)
+              ),
+              d.qty&&h('div',{style:{color:"#888",fontSize:"11px"}},"Szt.: ",d.qty),
+              d.comment&&h('div',{style:{color:"#666",fontSize:"11px",marginTop:"2px"}},d.comment),
+              h(Bar,{pct:d.pct}),
+              h('div',{style:{color:"#444",fontSize:"10px",marginTop:"4px"}},d.updated||"—")
+            );
+          })
+        ),
+        h(Modal,{open:modal!==null,onClose:()=>setModal(null),title:STREFY[modal]},
+          h('div',{style:{marginBottom:"10px"}},h('div',{style:css.label},"Poziom (%)"),h('input',{style:css.input,type:"number",min:0,max:100,value:pct,onChange:e=>setPct(e.target.value)})),
+          h('div',{style:{marginBottom:"10px"}},h('div',{style:css.label},"Liczba jednostek"),h('input',{style:css.input,value:qty,onChange:e=>setQty(e.target.value),placeholder:"np. 12 palet"})),
+          h('div',{style:{marginBottom:"16px"}},h('div',{style:css.label},"Komentarz"),h('textarea',{style:{...css.input,minHeight:"60px"},value:comment,onChange:e=>setComment(e.target.value)})),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 4 — SZAFKA ODPADÓW NIEBEZPIECZNYCH
+    // ============================================================
+    const SZAFKA_POLKI = ["Półka 1","Półka 2"];
+
+    function SzafkaNiebezpiecznych({data, onUpdate}) {
+      const polki = data.polki || {};
+      const [modal, setModal] = useState(null);
+      const [pct, setPct] = useState("");
+      const [qty, setQty] = useState("");
+      const [comment, setComment] = useState("");
+
+      const getPolka = (i) => polki[i] || {};
+
+      const open = (i) => {
+        const d = getPolka(i);
+        setPct(d.pct ?? "");
+        setQty(d.qty || "");
+        setComment(d.comment || "");
+        setModal(i);
+      };
+
+      const save = () => {
+        const p = parseInt(pct);
+        const updated = {...polki, [modal]: {pct: isNaN(p) ? null : Math.min(100, Math.max(0, p)), qty, comment, updated: now()}};
+        onUpdate({...data, polki: updated});
+        setModal(null);
+      };
+
+      return h('div', null,
+        h('div', {style:css.h2}, "⚠️ SZAFKA ODPADÓW NIEBEZPIECZNYCH"),
+        h('div', {style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:"12px"}},
+          SZAFKA_POLKI.map((name, i) => {
+            const d = getPolka(i);
+            const c = pctColor(d.pct);
+            return h('div', {key:i, onClick:()=>open(i), style:{...css.card,cursor:"pointer",borderColor:`${c}44`,background:`${c}11`,marginBottom:0}},
+              h('div', {style:{display:"flex",justifyContent:"space-between",marginBottom:"4px"}},
+                h('div', {style:{fontWeight:"600",fontSize:"14px"}}, name),
+                h('span', {style:css.tag(c)}, `${d.pct ?? '—'}%`)
+              ),
+              d.qty && h('div', {style:{color:"#888",fontSize:"12px"}}, "Szt.: ", d.qty),
+              d.comment && h('div', {style:{color:"#666",fontSize:"11px",marginTop:"2px"}}, d.comment),
+              h(Bar, {pct: d.pct}),
+              h('div', {style:{color:"#444",fontSize:"10px",marginTop:"4px"}}, d.updated || "—")
+            );
+          })
+        ),
+        h(Modal, {open:modal!==null, onClose:()=>setModal(null), title:SZAFKA_POLKI[modal]},
+          h('div', {style:{marginBottom:"10px"}},
+            h('div', {style:css.label}, "Poziom wypełnienia (%)"),
+            h('input', {style:css.input, type:"number", min:0, max:100, value:pct, onChange:e=>setPct(e.target.value)})
+          ),
+          h('div', {style:{marginBottom:"10px"}},
+            h('div', {style:css.label}, "Liczba jednostek (szt.)"),
+            h('input', {style:css.input, value:qty, onChange:e=>setQty(e.target.value), placeholder:"np. 5"})
+          ),
+          h('div', {style:{marginBottom:"16px"}},
+            h('div', {style:css.label}, "Komentarz"),
+            h('textarea', {style:{...css.input,minHeight:"60px"}, value:comment, onChange:e=>setComment(e.target.value), placeholder:"np. oleje, baterie..."})
+          ),
+          h('button', {style:css.btn(), onClick:save}, "💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 5 — WÓZKI
+    // ============================================================
+    function Wozki({data,onUpdate}) {
+      const [modal,setModal] = useState(null);
+      const [status,setStatus] = useState("sprawny");
+      const [note,setNote] = useState("");
+      const wozki = data.list || [{name:"Wózek widłowy №1",status:"sprawny",notes:[]},{name:"Wózek widłowy №2",status:"sprawny",notes:[]}];
+      const sc = {sprawny:"#22c55e","w naprawie":"#ef4444","wymaga serwisu":"#f97316"};
+
+      const open = (i) => { setStatus(wozki[i].status||"sprawny"); setNote(""); setModal(i); };
+      const save = () => {
+        const updated=[...wozki];
+        const notes=note?[...(updated[modal].notes||[]),{text:note,time:now()}]:updated[modal].notes||[];
+        updated[modal]={...updated[modal],status,notes};
+        onUpdate("list",updated);
+        setModal(null);
+      };
+
+      return h('div',null,
+        h('div',{style:css.h2},"🚜 WÓZKI WIDŁOWE"),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"10px"}},
+          wozki.map((w,i)=>h('div',{key:i,onClick:()=>open(i),style:{...css.card,cursor:"pointer",borderColor:`${sc[w.status]||"#333"}44`,marginBottom:0}},
+            h('div',{style:{fontWeight:"700",marginBottom:"8px"}},w.name),
+            h('span',{style:css.tag(sc[w.status]||"#888")},w.status),
+            (w.notes||[]).slice(-1).map((n,j)=>h('div',{key:j,style:{color:"#555",fontSize:"11px",marginTop:"6px"}},"📝 ",n.text))
+          ))
+        ),
+        h(Modal,{open:modal!==null,onClose:()=>setModal(null),title:wozki[modal]?.name},
+          h('div',{style:{marginBottom:"10px"}},h('div',{style:css.label},"Status"),
+            h('select',{style:css.select,value:status,onChange:e=>setStatus(e.target.value)},
+              ["sprawny","w naprawie","wymaga serwisu"].map(s=>h('option',{key:s},s))
+            )
+          ),
+          h('div',{style:{marginBottom:"16px"}},h('div',{style:css.label},"Nowa notatka"),h('input',{style:css.input,value:note,onChange:e=>setNote(e.target.value),placeholder:"Dodaj notatkę..."})),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 6 — BUTLE
+    // ============================================================
+    function Butle({data,onUpdate}) {
+      const [full,setFull] = useState(data.full??0);
+      const [empty,setEmpty] = useState(data.empty??0);
+      const [low,setLow] = useState(data.threshLow??5);
+      const [crit,setCrit] = useState(data.threshCrit??2);
+      const c = data.full<=(data.threshCrit??2)?"#ef4444":data.full<=(data.threshLow??5)?"#eab308":"#22c55e";
+
+      const save = () => onUpdate({full:parseInt(full)||0,empty:parseInt(empty)||0,threshLow:parseInt(low)||5,threshCrit:parseInt(crit)||2,updated:now()});
+
+      return h('div',null,
+        h('div',{style:css.h2},"🔵 BUTLE GAZOWE"),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px",marginBottom:"16px"}},
+          h('div',{style:{...css.card,borderColor:`${c}44`,background:`${c}11`,textAlign:"center",marginBottom:0}},
+            h('div',{style:{fontSize:"40px",fontWeight:"900",color:c}},data.full??0),
+            h('div',{style:{color:"#888"}},"Pełnych butli"),
+            (data.full??0)<=(data.threshCrit??2)&&h('div',{style:{...css.tag("#ef4444"),marginTop:"8px",display:"block"}},"⚠️ KRYTYCZNIE MAŁO")
+          ),
+          h('div',{style:{...css.card,textAlign:"center",marginBottom:0}},
+            h('div',{style:{fontSize:"40px",fontWeight:"900",color:"#555"}},data.empty??0),
+            h('div',{style:{color:"#888"}},"Pustych butli")
+          )
+        ),
+        h('div',{style:css.card},
+          h('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"8px",marginBottom:"12px"}},
+            h('div',null,h('div',{style:css.label},"Pełnych"),h('input',{style:css.input,type:"number",value:full,onChange:e=>setFull(e.target.value)})),
+            h('div',null,h('div',{style:css.label},"Pustych"),h('input',{style:css.input,type:"number",value:empty,onChange:e=>setEmpty(e.target.value)})),
+            h('div',null,h('div',{style:css.label},"Próg mało"),h('input',{style:css.input,type:"number",value:low,onChange:e=>setLow(e.target.value)})),
+            h('div',null,h('div',{style:css.label},"Próg kryt."),h('input',{style:css.input,type:"number",value:crit,onChange:e=>setCrit(e.target.value)}))
+          ),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 7 — PRACOWNICY
+    // ============================================================
+    const DEFAULT_PRACOWNICY = [
+      {name:"Pracownik 1",role:"I zmiana (06:00–14:00)",phone:"",whatsapp:"",rating:"średnio",info:"Pon–Pt"},
+      {name:"Pracownik 2",role:"I zmiana (06:00–14:00)",phone:"",whatsapp:"",rating:"średnio",info:"Pon–Pt"},
+      {name:"Pracownik 3",role:"II/III zmiana (rotacja)",phone:"",whatsapp:"",rating:"średnio",info:""},
+      {name:"Pracownik 4",role:"II/III zmiana (rotacja)",phone:"",whatsapp:"",rating:"średnio",info:""},
+      {name:"Pracownik 5",role:"II/III zmiana (rotacja)",phone:"",whatsapp:"",rating:"średnio",info:""},
+      {name:"Pracownik 6",role:"II/III zmiana (rotacja)",phone:"",whatsapp:"",rating:"średnio",info:""},
+    ];
+
+    function Pracownicy({data,onUpdate,grafik}) {
+      const [modal,setModal] = useState(null);
+      const [form,setForm] = useState({});
+
+      // Zawsze dokładnie 6 pracowników — uzupełniamy domyślnymi jeśli brakuje
+      const rawList = data.list || [];
+      const list = Array.from({length:6},(_,i) => rawList[i] || DEFAULT_PRACOWNICY[i]);
+
+      const rc = {słabo:"#ef4444",średnio:"#eab308",dobrze:"#22c55e"};
+
+      const today = new Date();
+      const todayDay = today.getDate();
+      const isMarch = today.getMonth()===2&&today.getFullYear()===2026;
+      const defaultSchedule = generateMarchSchedule();
+      const nowMins = today.getHours()*60+today.getMinutes();
+
+      const isShiftActive = (day) => {
+        if(!day||day.type!=='praca'||!day.start||!day.end) return false;
+        const [sh,sm]=day.start.split(':').map(Number);
+        const [eh,em]=day.end.split(':').map(Number);
+        const startMins=sh*60+sm;
+        const endMins=eh*60+em;
+        // normalna zmiana (06-14, 14-22)
+        if(endMins>startMins) return nowMins>=startMins && nowMins<endMins;
+        // nocna (22-06) — aktywna od 22:00 do północy
+        return nowMins>=startMins;
+      };
+
+      const isOnShiftToday = (i) => {
+        if(!isMarch) return false;
+        const saved = grafik[`m_${i}_${todayDay}`];
+        const day = saved !== undefined ? saved : defaultSchedule[i]?.days[todayDay];
+        if(isShiftActive(day)) return true;
+        // nocna zmiana — sprawdź czy teraz jest 00:00–06:00 i wczoraj była nocna
+        if(nowMins < 6*60) {
+          const yday = todayDay-1;
+          if(yday>=1) {
+            const savedY = grafik[`m_${i}_${yday}`];
+            const dayY = savedY !== undefined ? savedY : defaultSchedule[i]?.days[yday];
+            if(dayY?.type==='praca'&&dayY?.start==='22:00') return true;
+          }
+        }
+        return false;
+      };
+
+      const getShiftLabel = (i) => {
+        if(!isMarch) return null;
+        const saved = grafik[`m_${i}_${todayDay}`];
+        const day = saved !== undefined ? saved : defaultSchedule[i]?.days[todayDay];
+        if(!day||day.type!=='praca') return null;
+        return `${day.start}–${day.end}`;
+      };
+
+      const openEdit = (i) => { setForm({...list[i]}); setModal(i); };
+      const save = () => {
+        const updated=[...list]; updated[modal]=form;
+        onUpdate("list",updated);
+        setModal(null);
+      };
+
+      return h('div',null,
+        h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
+          h('div',{style:css.h2,marginBottom:0},"👷 PRACOWNICY (6 szt.)"),
+          h('div',{style:{color:"#555",fontSize:"12px"}},"Status automatyczny z grafiku")
+        ),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"10px"}},
+          list.map((p,i)=>{
+            const onShift = isOnShiftToday(i);
+            const shiftLabel = getShiftLabel(i);
+            return h('div',{key:i,style:{...css.card,marginBottom:0,borderColor:onShift?"#22c55e55":"#2a2a2a",background:onShift?"rgba(34,197,94,0.05)":"#1a1a1a"}},
+              h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"8px"}},
+                h('div',null,
+                  h('div',{style:{fontWeight:"700",fontSize:"14px"}},p.name||`Pracownik ${i+1}`),
+                  h('div',{style:{color:"#555",fontSize:"11px",marginTop:"1px"}},p.role||"")
+                ),
+                h('div',{style:{textAlign:"right"}},
+                  h('span',{style:css.tag(onShift?"#22c55e":"#555")},onShift?"✓ na zmianie":"wolny"),
+                  shiftLabel&&h('div',{style:{color:"#888",fontSize:"10px",marginTop:"3px"}},shiftLabel)
+                )
+              ),
+              p.phone&&h('div',{style:{fontSize:"11px",color:"#888",marginBottom:"4px"}},"📞 ",p.phone),
+              p.whatsapp&&h('a',{href:`https://wa.me/${p.whatsapp}`,style:{color:"#22c55e",fontSize:"11px",textDecoration:"none",display:"block",marginBottom:"4px"}},"💬 WhatsApp"),
+              h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:"8px"}},
+                h('span',{style:css.tag(rc[p.rating]||"#888")},p.rating||"średnio"),
+                h('button',{style:{...css.btn("#888"),fontSize:"11px",padding:"4px 10px"},onClick:()=>openEdit(i)},"✏️ Edytuj")
+              ),
+              p.info&&h('div',{style:{color:"#555",fontSize:"11px",marginTop:"6px",borderTop:"1px solid #222",paddingTop:"5px"}},p.info)
+            );
+          })
+        ),
+        h(Modal,{open:modal!==null,onClose:()=>setModal(null),title:`Edytuj — ${list[modal]?.name||'Pracownik '+(modal+1)}`},
+          h('div',{style:{marginBottom:"8px"}},h('div',{style:css.label},"Imię i nazwisko"),h('input',{style:css.input,value:form.name||"",onChange:e=>setForm({...form,name:e.target.value})})),
+          h('div',{style:{marginBottom:"8px"}},h('div',{style:css.label},"Stanowisko"),h('input',{style:css.input,value:form.role||"",onChange:e=>setForm({...form,role:e.target.value})})),
+          h('div',{style:{marginBottom:"8px"}},h('div',{style:css.label},"Telefon"),h('input',{style:css.input,value:form.phone||"",onChange:e=>setForm({...form,phone:e.target.value})})),
+          h('div',{style:{marginBottom:"8px"}},h('div',{style:css.label},"WhatsApp (numer z kodem kraju, np. 48500123456)"),h('input',{style:css.input,value:form.whatsapp||"",onChange:e=>setForm({...form,whatsapp:e.target.value})})),
+          h('div',{style:{marginBottom:"8px"}},h('div',{style:css.label},"Ocena"),
+            h('select',{style:css.select,value:form.rating||"średnio",onChange:e=>setForm({...form,rating:e.target.value})},
+              ["słabo","średnio","dobrze"].map(o=>h('option',{key:o},o))
+            )
+          ),
+          h('div',{style:{marginBottom:"16px"}},h('div',{style:css.label},"Dodatkowe info"),h('textarea',{style:{...css.input,minHeight:"50px"},value:form.info||"",onChange:e=>setForm({...form,info:e.target.value})})),
+          h('button',{style:css.btn(),onClick:save},"💾 Zapisz")
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 9 — PLANER
+    // ============================================================
+    function Planer({kontenery,worki,strefy,done,onToggle}) {
+      const tasks=[];
+      KONTENERY.forEach((name,i)=>{ const d=kontenery[i]||{}; if((d.pct||0)>=60) tasks.push({name,pct:d.pct,id:`k${i}`,cat:"Kontener"}); });
+      WORKI.forEach((name,i)=>{ const d=worki[i]||{}; if((d.pct||0)>=60) tasks.push({name,pct:d.pct,id:`w${i}`,cat:"Worek"}); });
+      STREFY.forEach((name,i)=>{ const d=strefy[i]||{}; if((d.pct||0)>=60) tasks.push({name,pct:d.pct,id:`s${i}`,cat:"Strefa"}); });
+      tasks.sort((a,b)=>b.pct-a.pct);
+      const today=tasks.filter(t=>t.pct>=80);
+      const tomorrow=tasks.filter(t=>t.pct>=60&&t.pct<80);
+
+      const Item = ({t}) => h('div',{style:{display:"flex",alignItems:"center",gap:"8px",padding:"7px 0",borderBottom:"1px solid #1f1f1f",opacity:done[t.id]?0.4:1}},
+        h('input',{type:"checkbox",checked:!!done[t.id],onChange:()=>onToggle(t.id)}),
+        h('div',{style:{flex:1}},
+          h('div',{style:{fontSize:"12px",textDecoration:done[t.id]?"line-through":"none"}},t.name),
+          h('div',{style:{color:"#555",fontSize:"10px"}},t.cat)
+        ),
+        h('span',{style:css.tag(pctColor(t.pct))},t.pct+"%")
+      );
+
+      return h('div',null,
+        h('div',{style:css.h2},"📋 PLANER WYMIAN I ZAŁADUNKÓW"),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:"12px"}},
+          h('div',{style:css.card},
+            h('div',{style:{fontSize:"11px",color:"#f97316",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"12px"}},"⚡ PLAN NA DZIŚ (≥80%)"),
+            today.length===0?h('div',{style:{color:"#555"}},"Brak pilnych zadań"):today.map(t=>h(Item,{key:t.id,t}))
+          ),
+          h('div',{style:css.card},
+            h('div',{style:{fontSize:"11px",color:"#eab308",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"12px"}},"🕐 PLAN NA JUTRO (60-79%)"),
+            tomorrow.length===0?h('div',{style:{color:"#555"}},"Brak zaplanowanych"):tomorrow.map(t=>h(Item,{key:t.id,t}))
+          )
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 10 — NOTATKI
+    // ============================================================
+    function Notatki({data,onAdd}) {
+      const [text,setText] = useState("");
+      const add = () => { if(!text.trim()) return; onAdd({text:text.trim(),time:now()}); setText(""); };
+
+      return h('div',null,
+        h('div',{style:css.h2},"📝 DZIENNIK NOTATEK"),
+        h('div',{style:{display:"flex",gap:"8px",marginBottom:"12px"}},
+          h('textarea',{style:{...css.input,minHeight:"60px",flex:1},value:text,onChange:e=>setText(e.target.value),placeholder:"Wpisz notatkę..."}),
+          h('button',{style:{...css.btn(),alignSelf:"flex-end"},onClick:add},"+ Dodaj")
+        ),
+        h('div',{style:css.card},
+          data.length===0?h('div',{style:{color:"#555"}},"Brak notatek"):
+          [...data].reverse().map((n,i)=>h('div',{key:i,style:{borderBottom:"1px solid #1f1f1f",padding:"8px 0"}},
+            h('div',{style:{color:"#555",fontSize:"10px",marginBottom:"3px"}},n.time),
+            h('div',null,n.text)
+          ))
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 13 — BAZA WIEDZY
+    // ============================================================
+    function BazaWiedzy({data,onAdd,onDelete}) {
+      const [text,setText] = useState("");
+      const [search,setSearch] = useState("");
+      const [confirmDel,setConfirmDel] = useState(null);
+      const add = () => { if(!text.trim()) return; onAdd({text:text.trim(),time:now()}); setText(""); };
+      const filtered = search ? data.filter(e=>e.text.toLowerCase().includes(search.toLowerCase())) : data;
+
+      return h('div',null,
+        h('div',{style:css.h2},"📚 BAZA WIEDZY PLACU"),
+        h('div',{style:{display:"flex",gap:"8px",marginBottom:"12px"}},
+          h('textarea',{style:{...css.input,minHeight:"60px",flex:1},value:text,onChange:e=>setText(e.target.value),placeholder:"Wpisz dowolną informację..."}),
+          h('button',{style:{...css.btn(),alignSelf:"flex-end"},onClick:add},"+ Dodaj")
+        ),
+        h('input',{style:{...css.input,marginBottom:"12px"},value:search,onChange:e=>setSearch(e.target.value),placeholder:"🔍 Szukaj..."}),
+        h('div',{style:css.card},
+          filtered.length===0?h('div',{style:{color:"#555"}},"Brak wpisów"):
+          [...filtered].reverse().map((e,i)=>h('div',{key:e._id||i,style:{borderBottom:"1px solid #1f1f1f",padding:"8px 0",display:"flex",gap:"8px",alignItems:"flex-start"}},
+            h('div',{style:{flex:1}},
+              h('div',{style:{color:"#555",fontSize:"10px",marginBottom:"3px"}},e.time),
+              h('div',{style:{fontSize:"14px"}},e.text)
+            ),
+            confirmDel===e._id
+              ? h('div',{style:{display:"flex",gap:"4px",alignItems:"center"}},
+                  h('span',{style:{color:"#ef4444",fontSize:"11px"}},"Usunąć?"),
+                  h('button',{style:{...css.btn("#ef4444"),padding:"3px 8px",fontSize:"11px"},onClick:()=>{onDelete(e._id);setConfirmDel(null);}},"Tak"),
+                  h('button',{style:{...css.btn("#555"),padding:"3px 8px",fontSize:"11px"},onClick:()=>setConfirmDel(null)},"Nie")
+                )
+              : h('button',{style:{...css.btn("#ef4444"),padding:"3px 8px",fontSize:"11px",alignSelf:"center"},onClick:()=>setConfirmDel(e._id)},"🗑️")
+          ))
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 8 — GRAFIK PRACY
+    // ============================================================
+
+    // Генерируем расписание на март 2026
+    const generateMarchSchedule = () => {
+      const schedule = [];
+      // Работники 1,2 — только первая смена 06:00-14:00 пн-пт
+      // Работники 3,4 — чередуются по неделям: нед1=14-22, нед2=22-06, нед3=14-22, нед4=22-06, нед5=14-22
+      // Работники 5,6 — наоборот: нед1=22-06, нед2=14-22, нед3=22-06, нед4=14-22, нед5=22-06
+      // Неделя считается по воскресенью 22:00: вс1.03→сб7.03, вс8.03→сб14.03 и т.д.
+
+      const getWeekNum = (day) => {
+        // вс 1 → нед1, вс 8 → нед2, вс 15 → нед3, вс 22 → нед4, вс 29 → нед5
+        if(day>=1&&day<=7) return 1;
+        if(day>=8&&day<=14) return 2;
+        if(day>=15&&day<=21) return 3;
+        if(day>=22&&day<=28) return 4;
+        return 5;
+      };
+
+      for(let wi=0; wi<6; wi++) {
+        const days = {};
+        for(let d=1; d<=31; d++) {
+          const dow = new Date(2026,2,d).getDay(); // 0=вс,6=сб
+          const wn = getWeekNum(d);
+
+          if(dow===6) { // суббота
+            // Ночная смена заканчивается в субботу 06:00 — только работники 3-6 у кого ночная
+            if(wi>=2) {
+              // нечётные недели для 3,4 → дневная (14-22), чётные → ночная (22-06)
+              // для 5,6 наоборот
+              let isNight34 = (wn%2===0); // нед2,4 = ночная для 3,4
+              let isNight56 = (wn%2===1); // нед1,3,5 = ночная для 5,6
+              let isNight = wi<4 ? isNight34 : isNight56;
+              if(isNight) {
+                // ночная смена — суббота это конец смены (00:00-06:00)
+                days[d] = {type:'praca', start:'00:00', end:'06:00', note:'koniec nocnej'};
+              } else {
+                days[d] = {type:'wolny'};
+              }
+            } else {
+              days[d] = {type:'wolny'};
+            }
+          } else if(dow===0) { // воскресенье
+            if(wi>=2) {
+              let isNight34 = (wn%2===1); // нед1,3,5 = ночная для 3,4 (начинается в вс)
+              let isNight56 = (wn%2===0); // нед2,4 = ночная для 5,6
+              // Воскресенье — начало недели. Ночная смена НАЧИНАЕТСЯ в вс 22:00
+              // Значит вс = рабочий день только для тех кто идёт в ночь
+              let isNight = wi<4 ? isNight34 : isNight56;
+              if(isNight) {
+                days[d] = {type:'praca', start:'22:00', end:'06:00', note:'start nocnej'};
+              } else {
+                days[d] = {type:'wolny'};
+              }
+            } else {
+              days[d] = {type:'wolny'};
+            }
+          } else {
+            // пн-пт
+            if(wi<2) {
+              // Работники 1,2 — первая смена
+              days[d] = {type:'praca', start:'06:00', end:'14:00'};
+            } else {
+              const wn2 = getWeekNum(d);
+              let isNight34 = (wn2%2===0); // чётные недели = ночная для 3,4
+              let isNight56 = (wn2%2===1); // нечётные = ночная для 5,6
+              let isNight = wi<4 ? isNight34 : isNight56;
+              if(isNight) {
+                days[d] = {type:'praca', start:'22:00', end:'06:00'};
+              } else {
+                days[d] = {type:'praca', start:'14:00', end:'22:00'};
+              }
+            }
+          }
+        }
+        schedule.push({days});
+      }
+      return schedule;
+    };
+
+    function GrafikPracy({pracownicy, grafik, onUpdate}) {
+      const rawList = pracownicy.list || [];
+      const list = Array.from({length:6},(_,i) => rawList[i] || DEFAULT_PRACOWNICY[i]);
+      const today = new Date();
+      const todayDay = today.getDate();
+      const todayMonth = today.getMonth(); // 2 = marzec
+      const isMarch = todayMonth === 2 && today.getFullYear() === 2026;
+
+      const defaultSchedule = generateMarchSchedule();
+
+      const getDay = (wi, d) => {
+        const saved = grafik[`m_${wi}_${d}`];
+        if(saved) return saved;
+        return defaultSchedule[wi]?.days[d] || {type:'wolny'};
+      };
+
+      const calcH = (start, end) => {
+        if(!start||!end) return 0;
+        const [sh,sm]=start.split(':').map(Number);
+        const [eh,em]=end.split(':').map(Number);
+        let mins = (eh*60+em)-(sh*60+sm);
+        if(mins<0) mins+=24*60;
+        return (mins/60).toFixed(1);
+      };
+
+      const totalH = (wi) => {
+        let t=0;
+        for(let d=1;d<=31;d++){
+          const day=getDay(wi,d);
+          if(day.type==='praca'&&day.start&&day.end) t+=parseFloat(calcH(day.start,day.end));
+        }
+        return t.toFixed(1);
+      };
+
+      const saveDay = (wi, d, val) => {
+        onUpdate(`m_${wi}_${d}`, val);
+      };
+
+      const [openIdx, setOpenIdx] = useState(null);
+      const [editDay, setEditDay] = useState({});
+      const [editModal, setEditModal] = useState(null);
+
+      const openDayModal = (wi, d) => {
+        setEditDay({...getDay(wi,d), wi, d});
+        setEditModal(true);
+      };
+
+      const saveDayModal = () => {
+        const {wi, d, ...rest} = editDay;
+        saveDay(wi, d, rest);
+        setEditModal(null);
+      };
+
+      const dowName = (d) => {
+        const names = ['Nd','Pn','Wt','Śr','Cz','Pt','Sb'];
+        return names[new Date(2026,2,d).getDay()];
+      };
+
+      const shiftColor = (day) => {
+        if(!day||day.type==='wolny') return '#555';
+        if(day.start==='06:00') return '#22c55e';
+        if(day.start==='14:00') return '#eab308';
+        if(day.start==='22:00') return '#60a5fa';
+        return '#888';
+      };
+
+      const shiftLabel = (day) => {
+        if(!day||day.type==='wolny') return 'wolny';
+        return `${day.start}–${day.end}`;
+      };
+
+      // Определяем кто сегодня на смене
+      const isOnShiftToday = (wi) => {
+        if(!isMarch) return false;
+        const day = getDay(wi, todayDay);
+        return day.type === 'praca';
+      };
+
+      return h('div',null,
+        h('div',{style:{...css.h2}},"📅 GRAFIK PRACY — MARZEC 2026"),
+        h('div',{style:{color:"#666",fontSize:"13px",marginBottom:"16px"}},"Kliknij na dzień aby edytować. Grafik załadowany automatycznie."),
+
+        list.length===0 && h('div',{style:{...css.card,color:"#666"}},"Dodaj pracowników w zakładce 👷 Pracownicy"),
+
+        list.map((p,wi)=>{
+          const onShift = isOnShiftToday(wi);
+          const shiftC = onShift ? "#22c55e" : "#555";
+          return h('div',{key:wi,style:{...css.card,marginBottom:"12px"}},
+            h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}},
+              h('div',null,
+                h('div',{style:{fontWeight:"700",fontSize:"15px"}},p.name||`Pracownik ${wi+1}`),
+                h('div',{style:{fontSize:"12px",color:"#666"}},p.role||"")
+              ),
+              h('div',{style:{display:"flex",gap:"8px",alignItems:"center"}},
+                h('span',{style:css.tag(shiftC)},onShift?"✓ na zmianie dziś":"wolny dziś"),
+                h('span',{style:{...css.tag("#60a5fa"),fontSize:"12px"}},totalH(wi)+" h / mies.")
+              )
+            ),
+            h('div',{style:{overflowX:"auto"}},
+              h('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px",minWidth:"500px"}},
+                h('thead',null,
+                  h('tr',{style:{color:"#555",borderBottom:"1px solid #2a2a2a"}},
+                    h('th',{style:{padding:"5px 6px",textAlign:"left",fontWeight:"500"}},"Dzień"),
+                    h('th',{style:{padding:"5px 6px",textAlign:"center",fontWeight:"500"}},"Smiana"),
+                    h('th',{style:{padding:"5px 6px",textAlign:"center",fontWeight:"500"}},"Od"),
+                    h('th',{style:{padding:"5px 6px",textAlign:"center",fontWeight:"500"}},"Do"),
+                    h('th',{style:{padding:"5px 6px",textAlign:"center",fontWeight:"500"}},"Godz.")
+                  )
+                ),
+                h('tbody',null,
+                  Array.from({length:31},(_,i)=>i+1).map(d=>{
+                    const day = getDay(wi,d);
+                    const isToday = isMarch && d===todayDay;
+                    const dow = new Date(2026,2,d).getDay();
+                    const isWeekend = dow===0||dow===6;
+                    const c = shiftColor(day);
+                    const bg = isToday ? "rgba(96,165,250,0.1)" : isWeekend&&day.type==='wolny' ? "rgba(50,50,50,0.3)" : "transparent";
+                    return h('tr',{key:d,onClick:()=>openDayModal(wi,d),
+                      style:{cursor:"pointer",background:bg,borderBottom:"1px solid #1a1a1a"}},
+                      h('td',{style:{padding:"4px 6px",color:isToday?"#60a5fa":isWeekend?"#555":"#aaa",fontWeight:isToday?"700":"400"}},
+                        `${d} ${dowName(d)}`
+                      ),
+                      h('td',{style:{padding:"4px 6px",textAlign:"center"}},
+                        h('span',{style:{...css.tag(c),fontSize:"11px"}},
+                          day.type==='wolny'?'wolny':day.start==='06:00'?'I':day.start==='14:00'?'II':'III'
+                        )
+                      ),
+                      h('td',{style:{padding:"4px 6px",textAlign:"center",color:c}},day.type==='praca'?day.start:"—"),
+                      h('td',{style:{padding:"4px 6px",textAlign:"center",color:c}},day.type==='praca'?day.end:"—"),
+                      h('td',{style:{padding:"4px 6px",textAlign:"center",color:"#22c55e",fontWeight:"600"}},
+                        day.type==='praca'?calcH(day.start,day.end):"—"
+                      )
+                    );
+                  })
+                )
+              )
+            )
+          );
+        }),
+
+        h(Modal,{open:!!editModal,onClose:()=>setEditModal(null),title:`Dzień ${editDay.d} — ${list[editDay.wi]?.name||'Pracownik '+(editDay.wi+1)}`},
+          h('div',{style:{marginBottom:"12px"}},
+            h('div',{style:css.label},"Typ dnia"),
+            h('select',{style:css.select,value:editDay.type||'wolny',onChange:e=>setEditDay({...editDay,type:e.target.value})},
+              h('option',{value:'praca'},"praca"),
+              h('option',{value:'wolny'},"wolny")
+            )
+          ),
+          editDay.type==='praca'&&h('div',null,
+            h('div',{style:{marginBottom:"12px"}},
+              h('div',{style:css.label},"Smiana"),
+              h('select',{style:css.select,value:editDay.start||'06:00',onChange:e=>{
+                const shifts={'06:00':'14:00','14:00':'22:00','22:00':'06:00'};
+                setEditDay({...editDay,start:e.target.value,end:shifts[e.target.value]});
+              }},
+                h('option',{value:'06:00'},"I smiana — 06:00–14:00"),
+                h('option',{value:'14:00'},"II smiana — 14:00–22:00"),
+                h('option',{value:'22:00'},"III smiana — 22:00–06:00")
+              )
+            )
+          ),
+          h('button',{style:css.btn(),onClick:saveDayModal},"💾 Zapisz")
+        )
+      );
+    }
+    // ============================================================
+    function Podsumowanie({kontenery,worki,strefy,wozki,butle,pracownicy,notatki,grafik}) {
+      const today = new Date();
+      const todayDay = today.getDate();
+      const isMarch = today.getMonth()===2&&today.getFullYear()===2026;
+      const defaultSchedule = generateMarchSchedule();
+      const nowMins = today.getHours()*60+today.getMinutes();
+
+      const isShiftActiveNow = (day) => {
+        if(!day||day.type!=='praca'||!day.start||!day.end) return false;
+        const [sh,sm]=day.start.split(':').map(Number);
+        const [eh,em]=day.end.split(':').map(Number);
+        const startMins=sh*60+sm;
+        const endMins=eh*60+em;
+        if(endMins>startMins) return nowMins>=startMins && nowMins<endMins;
+        return nowMins>=startMins;
+      };
+
+      const isOnShift = (wi) => {
+        if(!isMarch) return pracownicy.list?.[wi]?.status==="na zmianie";
+        const saved = grafik[`m_${wi}_${todayDay}`];
+        const day = saved || defaultSchedule[wi]?.days[todayDay];
+        if(isShiftActiveNow(day)) return true;
+        if(nowMins < 6*60) {
+          const yday = todayDay-1;
+          if(yday>=1) {
+            const savedY = grafik[`m_${wi}_${yday}`];
+            const dayY = savedY || defaultSchedule[wi]?.days[yday];
+            if(dayY?.type==='praca'&&dayY?.start==='22:00') return true;
+          }
+        }
+        return false;
+      };
+
+      const fullList = Array.from({length:6},(_,i) => (pracownicy.list||[])[i] || DEFAULT_PRACOWNICY[i]);
+      const onSmienie = fullList.filter((_,i)=>isOnShift(i));
+      const pilne=KONTENERY.filter((_,i)=>(kontenery[i]?.pct||0)>=80).length+WORKI.filter((_,i)=>(worki[i]?.pct||0)>=80).length+STREFY.filter((_,i)=>(strefy[i]?.pct||0)>=80).length;
+      const butleC=(butle.full??0)<=(butle.threshCrit??2)?"#ef4444":(butle.full??0)<=(butle.threshLow??5)?"#eab308":"#22c55e";
+
+      return h('div',null,
+        h('div',{style:css.h2},"🏠 PODSUMOWANIE ZMIANY"),
+        pilne>0&&h('div',{style:{...css.card,borderColor:"#ef4444",background:"rgba(239,68,68,0.1)",marginBottom:"12px"}},
+          h('div',{style:{color:"#ef4444",fontWeight:"700",fontSize:"15px"}},"⚠️ "+pilne+" obiektów wymaga pilnej wymiany (≥80%)")
+        ),
+        (butle.full??0)<=(butle.threshLow??5)&&h('div',{style:{...css.card,borderColor:butleC,background:`${butleC}11`,marginBottom:"12px"}},
+          h('div',{style:{color:butleC,fontWeight:"700",fontSize:"15px"}},"🔵 Butle gazowe: tylko "+(butle.full??0)+" pełnych")
+        ),
+        h('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:"12px"}},
+          h('div',{style:css.card},
+            h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"10px",fontWeight:"600"}},"📦 KONTENERY"),
+            KONTENERY.map((n,i)=>{const d=kontenery[i]||{};const c=pctColor(d.pct);return h('div',{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}},h('div',{style:{fontSize:"13px",color:"#bbb"}},n),h('span',{style:{color:c,fontSize:"13px",fontWeight:"700"}},`${d.pct??'—'}%`));})
+          ),
+          h('div',{style:css.card},
+            h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"10px",fontWeight:"600"}},"🛍️ WORKI"),
+            WORKI.map((n,i)=>{const d=worki[i]||{};const c=pctColor(d.pct);return h('div',{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}},h('div',{style:{fontSize:"13px",color:"#bbb"}},n),h('span',{style:{color:c,fontSize:"13px",fontWeight:"700"}},`${d.pct??'—'}%`));})
+          ),
+          h('div',{style:css.card},
+            h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"10px",fontWeight:"600"}},"🗺️ STREFY PLACU"),
+            STREFY.map((n,i)=>{const d=strefy[i]||{};const c=pctColor(d.pct);return h('div',{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}},h('div',{style:{fontSize:"13px",color:"#bbb",flex:1,paddingRight:"8px"}},n),h('span',{style:{color:c,fontSize:"13px",fontWeight:"700",whiteSpace:"nowrap"}},`${d.pct??'—'}%`));})
+          ),
+          h('div',null,
+            h('div',{style:{...css.card,marginBottom:"12px"}},
+              h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"8px",fontWeight:"600"}},"👷 NA ZMIANIE"),
+              onSmienie.length===0?h('div',{style:{color:"#555"}},"Brak"):onSmienie.map((p,i)=>h('div',{key:i,style:{color:"#22c55e",fontSize:"14px",padding:"2px 0"}},"✓ ",p.name))
+            ),
+            h('div',{style:{...css.card,borderColor:`${butleC}44`,marginBottom:"12px"}},
+              h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"8px",fontWeight:"600"}},"🔵 BUTLE GAZOWE"),
+              h('div',{style:{fontSize:"26px",fontWeight:"700",color:butleC}},butle.full??0," pełnych"),
+              h('div',{style:{color:"#555",fontSize:"13px"}},butle.empty??0," pustych")
+            ),
+            h('div',{style:css.card},
+              h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"8px",fontWeight:"600"}},"🚜 WÓZKI WIDŁOWE"),
+              (wozki.list||[{name:"Wózek №1",status:"sprawny"},{name:"Wózek №2",status:"sprawny"}]).map((w,i)=>{
+                const c={sprawny:"#22c55e","w naprawie":"#ef4444","wymaga serwisu":"#f97316"}[w.status]||"#888";
+                return h('div',{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0"}},h('div',{style:{fontSize:"13px"}},w.name),h('span',{style:css.tag(c)},w.status));
+              })
+            )
+          )
+        ),
+        notatki.length>0&&h('div',{style:{...css.card,marginTop:"12px"}},
+          h('div',{style:{fontSize:"13px",color:"#555",letterSpacing:"1px",textTransform:"uppercase",marginBottom:"10px",fontWeight:"600"}},"📝 OSTATNIE NOTATKI"),
+          [...notatki].slice(-3).reverse().map((n,i)=>h('div',{key:i,style:{padding:"6px 0",borderBottom:"1px solid #1a1a1a"}},
+            h('div',{style:{color:"#555",fontSize:"12px"}},n.time),
+            h('div',{style:{fontSize:"14px",marginTop:"2px"}},n.text)
+          ))
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 11 — HISTORIA I RAPORTY
+    // ============================================================
+    function HistoriaRaporty({kontenery,worki,strefy,wozki,butle,pracownicy,notatki,szafka,snapshots}) {
+      const [activeTab, setActiveTab] = useState("snapshots");
+      const [exportMsg, setExportMsg] = useState("");
+
+      // Generuj bieżący raport stanu
+      const genRaportDane = () => {
+        const pilne = [];
+        const planNaJutro = [];
+        const ok = [];
+
+        KONTENERY.forEach((n,i)=>{ const p=kontenery[i]?.pct||0; const obj={name:n,pct:p,typ:"Kontener"}; if(p>=80) pilne.push(obj); else if(p>=60) planNaJutro.push(obj); else ok.push(obj); });
+        WORKI.forEach((n,i)=>{ const p=worki[i]?.pct||0; const obj={name:n,pct:p,typ:"Worek"}; if(p>=80) pilne.push(obj); else if(p>=60) planNaJutro.push(obj); else ok.push(obj); });
+        STREFY.forEach((n,i)=>{ const p=strefy[i]?.pct||0; const obj={name:n,pct:p,typ:"Strefa"}; if(p>=80) pilne.push(obj); else if(p>=60) planNaJutro.push(obj); else ok.push(obj); });
+
+        return {pilne, planNaJutro, ok};
+      };
+
+      const exportCSV = () => {
+        const lines = ["Typ,Nazwa,Poziom (%),Status"];
+        KONTENERY.forEach((n,i)=>{ const p=kontenery[i]?.pct??"—"; const s=kontenery[i]?.status||"—"; const upd=kontenery[i]?.updated||"—"; lines.push(`Kontener,"${n}",${p},"${s}","${upd}"`); });
+        WORKI.forEach((n,i)=>{ const p=worki[i]?.pct??"—"; const s=worki[i]?.status||"—"; const upd=worki[i]?.updated||"—"; lines.push(`Worek,"${n}",${p},"${s}","${upd}"`); });
+        STREFY.forEach((n,i)=>{ const p=strefy[i]?.pct??"—"; const upd=strefy[i]?.updated||"—"; lines.push(`Strefa,"${n}",${p},"—","${upd}"`); });
+        const wList = wozki.list || [];
+        wList.forEach(w=>lines.push(`Wózek,"${w.name}","—","${w.status}","—"`));
+        lines.push(`Butle pełne,—,${butle.full||0},"—","${butle.updated||"—"}"`);
+
+        const notatki_lines = ["\nNotatki (ostatnie 20):","Czas,Treść"];
+        notatki.slice(-20).reverse().forEach(n=>notatki_lines.push(`"${n.time}","${n.text.replace(/"/g,'""')}"`));
+
+        const csv = [...lines,...notatki_lines].join("\n");
+        const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `plac-odpadow-${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setExportMsg("✅ Eksport gotowy!");
+        setTimeout(()=>setExportMsg(""),3000);
+      };
+
+      const {pilne, planNaJutro, ok} = genRaportDane();
+
+      // Statystyki globalne
+      const allItems = [...pilne,...planNaJutro,...ok];
+      const avgPct = allItems.length ? Math.round(allItems.reduce((s,x)=>s+(x.pct||0),0)/allItems.length) : 0;
+
+      const StatBar = ({label, value, max, color}) => h('div', {style:{marginBottom:"10px"}},
+        h('div', {style:{display:"flex",justifyContent:"space-between",marginBottom:"3px"}},
+          h('div', {style:{fontSize:"13px",color:"#aaa"}}, label),
+          h('span', {style:{color,fontSize:"13px",fontWeight:"700"}}, value+(max?`/${max}`:""))
+        ),
+        max && h('div', {style:{height:"4px",borderRadius:"2px",background:"#2a2a2a"}},
+          h('div', {style:{height:"100%",width:`${Math.min(value/max*100,100)}%`,background:color,borderRadius:"2px"}})
+        )
+      );
+
+      return h('div', null,
+        h('div', {style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
+          h('div', {style:css.h2}, "📊 HISTORIA I RAPORTY"),
+          h('button', {style:{...css.btn("#22c55e"),fontSize:"13px"}, onClick:exportCSV}, "⬇️ Eksport CSV")
+        ),
+        exportMsg && h('div', {style:{...css.card,borderColor:"#22c55e",background:"rgba(34,197,94,0.1)",marginBottom:"10px",color:"#22c55e"}}, exportMsg),
+
+        // Tabs
+        h('div', {style:{display:"flex",gap:"6px",marginBottom:"16px",flexWrap:"wrap"}},
+          h('button', {style:css.navBtn(activeTab==="snapshots"), onClick:()=>setActiveTab("snapshots")}, "📸 Snapshots"),
+          h('button', {style:css.navBtn(activeTab==="raport"), onClick:()=>setActiveTab("raport")}, "📋 Raport bieżący"),
+          h('button', {style:css.navBtn(activeTab==="statystyki"), onClick:()=>setActiveTab("statystyki")}, "📈 Statystyki"),
+          h('button', {style:css.navBtn(activeTab==="notatki"), onClick:()=>setActiveTab("notatki")}, "📝 Historia notatek")
+        ),
+
+        // Snapshots
+        activeTab==="snapshots" && h('div', null,
+          snapshots.length===0
+            ? h('div', {style:{...css.card,color:"#555",textAlign:"center",padding:"32px"}},
+                h('div', {style:{fontSize:"32px",marginBottom:"8px"}}, "📸"),
+                h('div', null, "Brak snapshotów. Pierwszy zostanie utworzony automatycznie dzisiaj.")
+              )
+            : snapshots.map((s,i) => {
+                const c = s.pilneCount>0 ? "#ef4444" : s.avgPct>=60 ? "#eab308" : "#22c55e";
+                return h('div', {key:i, style:{...css.card,marginBottom:"8px",borderColor:c+"44",background:c+"0a"}},
+                  h('div', {style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}},
+                    h('div', null,
+                      h('div', {style:{fontWeight:"700",fontSize:"14px"}}, s.date),
+                      h('div', {style:{color:"#555",fontSize:"11px"}}, "Zapis o: "+s.time)
+                    ),
+                    h('div', {style:{display:"flex",gap:"6px"}},
+                      h('span', {style:css.tag(c)}, "śr. "+s.avgPct+"%"),
+                      s.pilneCount>0 && h('span', {style:css.tag("#ef4444")}, "⚠️ "+s.pilneCount+" pilnych")
+                    )
+                  ),
+                  s.pilneNames && s.pilneNames.length>0 && h('div', {style:{color:"#ef4444",fontSize:"11px"}},
+                    "Pilne: "+s.pilneNames.join(", ")
+                  )
+                );
+              })
+        ),
+
+        // Raport bieżący
+        activeTab==="raport" && h('div', null,
+          h('div', {style:{color:"#555",fontSize:"12px",marginBottom:"12px"}}, "Wygenerowano: "+now()),
+          h('div', {style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:"12px"}},
+            h('div', {style:css.card},
+              h('div', {style:{fontSize:"11px",color:"#ef4444",letterSpacing:"1px",fontWeight:"600",marginBottom:"12px"}}, "🔴 PILNE — WYMIANA DZIŚ (≥80%)"),
+              pilne.length===0
+                ? h('div', {style:{color:"#555"}}, "✅ Brak pilnych obiektów")
+                : pilne.sort((a,b)=>b.pct-a.pct).map((t,i)=>
+                    h('div', {key:i, style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #1f1f1f"}},
+                      h('div', null,
+                        h('div', {style:{fontSize:"13px"}}, t.name),
+                        h('div', {style:{color:"#555",fontSize:"10px"}}, t.typ)
+                      ),
+                      h('span', {style:css.tag("#ef4444")}, t.pct+"%")
+                    )
+                  )
+            ),
+            h('div', {style:css.card},
+              h('div', {style:{fontSize:"11px",color:"#eab308",letterSpacing:"1px",fontWeight:"600",marginBottom:"12px"}}, "🟡 PLANOWAĆ JUTRO (60–79%)"),
+              planNaJutro.length===0
+                ? h('div', {style:{color:"#555"}}, "✅ Brak obiektów w tej kategorii")
+                : planNaJutro.sort((a,b)=>b.pct-a.pct).map((t,i)=>
+                    h('div', {key:i, style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #1f1f1f"}},
+                      h('div', null,
+                        h('div', {style:{fontSize:"13px"}}, t.name),
+                        h('div', {style:{color:"#555",fontSize:"10px"}}, t.typ)
+                      ),
+                      h('span', {style:css.tag("#eab308")}, t.pct+"%")
+                    )
+                  )
+            ),
+            h('div', {style:css.card},
+              h('div', {style:{fontSize:"11px",color:"#22c55e",letterSpacing:"1px",fontWeight:"600",marginBottom:"12px"}}, "🟢 OK — PONIŻEJ 60%"),
+              ok.sort((a,b)=>b.pct-a.pct).map((t,i)=>
+                h('div', {key:i, style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #1a1a1a"}},
+                  h('div', null,
+                    h('div', {style:{fontSize:"12px",color:"#bbb"}}, t.name),
+                    h('div', {style:{color:"#555",fontSize:"10px"}}, t.typ)
+                  ),
+                  h('span', {style:{color:"#22c55e",fontSize:"12px",fontWeight:"700"}}, t.pct+"%")
+                )
+              )
+            )
+          )
+        ),
+
+        // Statystyki
+        activeTab==="statystyki" && h('div', {style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:"12px"}},
+          h('div', {style:css.card},
+            h('div', {style:{fontWeight:"700",marginBottom:"14px",color:"#888",fontSize:"12px",letterSpacing:"1px"}}, "📦 KONTENERY"),
+            KONTENERY.map((n,i)=>{
+              const p=kontenery[i]?.pct||0;
+              const c=pctColor(p);
+              return h('div', {key:i, style:{marginBottom:"8px"}},
+                h('div', {style:{display:"flex",justifyContent:"space-between",marginBottom:"2px"}},
+                  h('div', {style:{fontSize:"12px",color:"#aaa",flex:1,paddingRight:"8px"}}, n),
+                  h('span', {style:{color:c,fontSize:"12px",fontWeight:"700"}}, p+"%")
+                ),
+                h(Bar, {pct:p})
+              );
+            })
+          ),
+          h('div', {style:css.card},
+            h('div', {style:{fontWeight:"700",marginBottom:"14px",color:"#888",fontSize:"12px",letterSpacing:"1px"}}, "🛍️ WORKI + 🗺️ STREFY"),
+            WORKI.map((n,i)=>{
+              const p=worki[i]?.pct||0;
+              const c=pctColor(p);
+              return h('div', {key:i, style:{marginBottom:"8px"}},
+                h('div', {style:{display:"flex",justifyContent:"space-between",marginBottom:"2px"}},
+                  h('div', {style:{fontSize:"12px",color:"#aaa",flex:1,paddingRight:"8px"}}, n),
+                  h('span', {style:{color:c,fontSize:"12px",fontWeight:"700"}}, p+"%")
+                ),
+                h(Bar, {pct:p})
+              );
+            }),
+            h('div', {style:{borderTop:"1px solid #2a2a2a",marginTop:"10px",paddingTop:"10px"}}),
+            STREFY.map((n,i)=>{
+              const p=strefy[i]?.pct||0;
+              const c=pctColor(p);
+              return h('div', {key:i, style:{marginBottom:"6px"}},
+                h('div', {style:{display:"flex",justifyContent:"space-between",marginBottom:"2px"}},
+                  h('div', {style:{fontSize:"11px",color:"#888",flex:1,paddingRight:"8px"}}, n),
+                  h('span', {style:{color:c,fontSize:"11px",fontWeight:"700"}}, p+"%")
+                ),
+                h(Bar, {pct:p})
+              );
+            })
+          ),
+          h('div', {style:css.card},
+            h('div', {style:{fontWeight:"700",marginBottom:"14px",color:"#888",fontSize:"12px",letterSpacing:"1px"}}, "📊 PODSUMOWANIE OGÓLNE"),
+            h(StatBar, {label:"Śr. poziom wypełnienia", value:avgPct, max:100, color:pctColor(avgPct)}),
+            h(StatBar, {label:"Pilnych do wymiany", value:pilne.length, max:allItems.length, color:"#ef4444"}),
+            h(StatBar, {label:"Planować jutro", value:planNaJutro.length, max:allItems.length, color:"#eab308"}),
+            h(StatBar, {label:"Poniżej 60% (ok)", value:ok.length, max:allItems.length, color:"#22c55e"}),
+            h('div', {style:{borderTop:"1px solid #2a2a2a",margin:"12px 0"}}),
+            h(StatBar, {label:"Butle pełne", value:butle.full||0, max:(butle.full||0)+(butle.empty||0)||10, color:(butle.full||0)<=(butle.threshCrit||2)?"#ef4444":(butle.full||0)<=(butle.threshLow||5)?"#eab308":"#22c55e"}),
+            h(StatBar, {label:"Pracownicy łącznie", value:(pracownicy.list||[]).length, color:"#60a5fa"}),
+            h(StatBar, {label:"Notatki łącznie", value:notatki.length, color:"#a855f7"})
+          )
+        ),
+
+        // Historia notatek
+        activeTab==="notatki" && h('div', {style:css.card},
+          notatki.length===0
+            ? h('div', {style:{color:"#555"}}, "Brak notatek")
+            : [...notatki].reverse().map((n,i) =>
+                h('div', {key:i, style:{borderBottom:"1px solid #1f1f1f",padding:"8px 0",display:"flex",gap:"10px",alignItems:"flex-start"}},
+                  h('div', {style:{color:"#555",fontSize:"10px",whiteSpace:"nowrap",minWidth:"80px"}}, n.time),
+                  h('div', {style:{fontSize:"13px",color:"#ccc"}}, n.text)
+                )
+              )
+        )
+      );
+    }
+
+    // ============================================================
+    // BLOK 15 — AGENT AI
+    // ============================================================
+    function AgentAI({kontenery,worki,strefy,wozki,butle,pracownicy,notatki,baza,snapshots}) {
+      const [loading,setLoading] = useState(false);
+      const [response,setResponse] = useState(null);
+      const [error,setError] = useState(null);
+
+      const analyze = async () => {
+        setLoading(true); setError(null); setResponse(null);
+        const summary = {
+          kontenery: KONTENERY.map((n,i)=>({name:n,...kontenery[i]})),
+          worki: WORKI.map((n,i)=>({name:n,...worki[i]})),
+          strefy: STREFY.map((n,i)=>({name:n,...strefy[i]})),
+          wozki: wozki.list||[],
+          butle,
+          pracownicy: pracownicy.list||[],
+          notatki: notatki.slice(-10),
+          baza: baza.slice(-20)
+        };
+        const histSummary = (snapshots||[]).slice(0,30).map(s=>({
+          date: s.date,
+          avgPct: s.avgPct,
+          pilneCount: s.pilneCount,
+          pilneNames: s.pilneNames,
+          butlePelne: s.butle?.full
+        }));
+        const hasHistory = histSummary.length > 1;
+        const historyBlock = hasHistory
+          ? `\n\nHISTORIA PLACU (ostatnie ${histSummary.length} dni):\n${JSON.stringify(histSummary,null,2)}`
+          : "\n\n(Brak historii — snapshots zbierane od dziś)";
+        const prompt = `Jesteś asystentem operatora placu odpadów produkcyjnych (fabryka lodówek i piekarników). Przeanalizuj dane i napisz raport po polsku:\n\n1. STAN OBECNY — obiektywny stan placu\n2. REKOMENDACJE — konkretne działania na dziś i jutro\n3. TRENDY — ${hasHistory ? "analiza historii "+histSummary.length+" dni" : "za mało danych"}\n4. PROPOZYCJE USPRAWNIEŃ — automatyzacja, optymalizacja\n\nDANE BIEŻĄCE:\n${JSON.stringify(summary,null,2)}${historyBlock}\n\nBądź konkretny i zwięzły.`;
+        try {
+          const res = await fetch("https://api.anthropic.com/v1/messages",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})
+          });
+          const data = await res.json();
+          setResponse(data.content?.map(c=>c.text||"").join("")||"Brak odpowiedzi");
+        } catch(e) { setError("Błąd połączenia z API Anthropic."); }
+        setLoading(false);
+      };
+
+      return h('div',null,
+        h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
+          h('div',{style:css.h2},"🤖 AGENT AI"),
+          h('button',{style:{...css.btn("#a855f7"),fontSize:"13px",padding:"8px 20px"},onClick:analyze,disabled:loading},loading?"⏳ Analizuję...":"🔍 Analizuj dane")
+        ),
+        h('div',{style:{...css.card,borderColor:"#a855f722",marginBottom:"12px"}},
+          h('div',{style:{color:"#555",fontSize:"12px",marginBottom:"4px"}},"📸 Historia: "+(snapshots&&snapshots.length>0?snapshots.length+" snapshotów ("+snapshots[snapshots.length-1]?.date+" — "+snapshots[0]?.date+")":"brak snapshotów")),
+          h('div',{style:{color:"#666",fontSize:"11px"}},"Agent analizuje wszystkie dane + historię placu. Kliknij przycisk aby otrzymać raport i rekomendacje.")
+        ),
+        error&&h('div',{style:{...css.card,borderColor:"#ef4444",background:"rgba(239,68,68,0.1)",color:"#ef4444"}},error),
+        response&&h('div',{style:css.card},
+          response.split("\n").map((line,i)=>{
+            if(/^(1\.|2\.|3\.)/.test(line.trim())) return h('div',{key:i,style:{color:"#a855f7",fontWeight:"700",fontSize:"13px",marginTop:"16px",marginBottom:"6px"}},line);
+            if(line.startsWith("- ")||line.startsWith("• ")) return h('div',{key:i,style:{color:"#bbb",paddingLeft:"12px",marginTop:"3px"}},"→ "+line.slice(2));
+            return h('div',{key:i,style:{color:"#aaa",marginTop:"3px",lineHeight:1.6}},line);
+          })
+        )
+      );
+    }
+
+    // ============================================================
+    // GŁÓWNA APLIKACJA
+    // ============================================================
+    function App() {
+      const [tab,setTab] = useState("podsumowanie");
+      const [kontenery,setKontenery] = useState({});
+      const [worki,setWorki] = useState({});
+      const [strefy,setStrefy] = useState({});
+      const [wozki,setWozki] = useState({});
+      const [butle,setButle] = useState({});
+      const [pracownicy,setPracownicy] = useState({});
+      const [planerDone,setPlanerDone] = useState({});
+      const [grafik,setGrafik] = useState({});
+      const [notatki,setNotatki] = useState([]);
+      const [baza,setBaza] = useState([]);
+      const [szafka,setSzafka] = useState({});
+      const [snapshots,setSnapshots] = useState([]);
+      const dataRef = useRef({});
+
+      useEffect(()=>{
+        [["kontenery",setKontenery],["worki",setWorki],["strefy",setStrefy],["wozki",setWozki],["butle",setButle],["pracownicy",setPracownicy],["planerDone",setPlanerDone],["grafik",setGrafik],["szafka",setSzafka]].forEach(([p,s])=>{
+          onValue(ref(db,p),snap=>{ const v=snap.val(); if(v){ s(v); dataRef.current[p]=v; } });
+        });
+        onValue(ref(db,"notatki"),snap=>{ const v=snap.val(); const arr=v?Object.values(v):[]; setNotatki(arr); dataRef.current.notatki=arr; });
+        onValue(ref(db,"baza"),snap=>{ const v=snap.val(); const arr=v?Object.entries(v).map(([id,val])=>({...val,_id:id})):[]; setBaza(arr); dataRef.current.baza=arr; });
+        onValue(ref(db,"snapshots"),snap=>{ const v=snap.val(); if(v) setSnapshots(Object.entries(v).map(([id,val])=>({...val,_id:id})).sort((a,b)=>b.date.localeCompare(a.date))); else setSnapshots([]); });
+      },[]);
+
+      // Auto-snapshot raz dziennie
+      useEffect(()=>{
+        const todayKey = new Date().toISOString().slice(0,10);
+        const fbKey = todayKey.replace(/-/g,"_");
+        const timer = setTimeout(()=>{
+          onValue(ref(db,"snapshots/"+fbKey), snap=>{
+            if(!snap.val()){
+              const d = dataRef.current;
+              const pilne = [];
+              KONTENERY.forEach((n,i)=>{ const p=(d.kontenery||{})[i]?.pct||0; if(p>=80) pilne.push(n); });
+              WORKI.forEach((n,i)=>{ const p=(d.worki||{})[i]?.pct||0; if(p>=80) pilne.push(n); });
+              const allPcts = [...KONTENERY.map((_,i)=>(d.kontenery||{})[i]?.pct||0),...WORKI.map((_,i)=>(d.worki||{})[i]?.pct||0)];
+              const avgPct = Math.round(allPcts.reduce((a,b)=>a+b,0)/allPcts.length);
+              const snapshot = {
+                date: todayKey,
+                time: new Date().toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"}),
+                kontenery: KONTENERY.map((n,i)=>({name:n,...((d.kontenery||{})[i]||{})})),
+                worki: WORKI.map((n,i)=>({name:n,...((d.worki||{})[i]||{})})),
+                strefy: STREFY.map((n,i)=>({name:n,...((d.strefy||{})[i]||{})})),
+                butle: d.butle||{},
+                wozki: (d.wozki||{}).list||[],
+                szafka: d.szafka||{},
+                pilneCount: pilne.length,
+                pilneNames: pilne.slice(0,5),
+                avgPct
+              };
+              set(ref(db,"snapshots/"+fbKey), snapshot);
+            }
+          },{onlyOnce:true});
+        }, 3500);
+        return ()=>clearTimeout(timer);
+      },[]);
+
+      const fbSet = (p,v) => set(ref(db,p),v);
+      const upK = (i,v) => { const u={...kontenery,[i]:v}; setKontenery(u); fbSet("kontenery",u); };
+      const upW = (i,v) => { const u={...worki,[i]:v}; setWorki(u); fbSet("worki",u); };
+      const upS = (i,v) => { const u={...strefy,[i]:v}; setStrefy(u); fbSet("strefy",u); };
+      const upWo = (k,v) => { const u={...wozki,[k]:v}; setWozki(u); fbSet("wozki",u); };
+      const upB = (v) => { setButle(v); fbSet("butle",v); };
+      const upP = (k,v) => { const u={...pracownicy,[k]:v}; setPracownicy(u); fbSet("pracownicy",u); };
+      const upDone = (id) => { const u={...planerDone,[id]:!planerDone[id]}; setPlanerDone(u); fbSet("planerDone",u); };
+      const upGrafik = (k,v) => { const u={...grafik,[k]:v}; setGrafik(u); fbSet("grafik",u); };
+      const upSzafka = (v) => { setSzafka(v); fbSet("szafka",v); };
+      const addN = (n) => { push(ref(db,"notatki"),n); setNotatki(p=>[...p,n]); };
+      const addB = (e) => { push(ref(db,"baza"),e); };
+      const delB = (id) => { set(ref(db,`baza/${id}`),null); };
+
+      const TABS = [
+        {id:"podsumowanie",label:"🏠 Podsumowanie"},
+        {id:"kontenery",label:"📦 Kontenery"},
+        {id:"worki",label:"🛍️ Worki"},
+        {id:"strefy",label:"🗺️ Strefy"},
+        {id:"szafka",label:"⚠️ Szafka"},
+        {id:"wozki",label:"🚜 Wózki"},
+        {id:"butle",label:"🔵 Butle"},
+        {id:"pracownicy",label:"👷 Pracownicy"},
+        {id:"grafik",label:"📅 Grafik"},
+        {id:"planer",label:"📋 Planer"},
+        {id:"notatki",label:"📝 Notatki"},
+        {id:"historia",label:"📊 Historia"},
+        {id:"baza",label:"📚 Baza wiedzy"},
+        {id:"ai",label:"🤖 Agent AI"},
+      ];
+
+      return h('div',{style:css.app},
+        h('div',{style:css.topbar},
+          h('div',{style:css.logo},"PLAC ODPADÓW"),
+          TABS.map(t=>h('button',{key:t.id,style:css.navBtn(tab===t.id),onClick:()=>setTab(t.id)},t.label))
+        ),
+        h('div',{style:css.main},
+          tab==="podsumowanie"&&h(Podsumowanie,{kontenery,worki,strefy,wozki,butle,pracownicy,notatki,grafik}),
+          tab==="kontenery"&&h(Kontenery,{data:kontenery,onUpdate:upK}),
+          tab==="worki"&&h(Worki,{data:worki,onUpdate:upW}),
+          tab==="strefy"&&h(Strefy,{data:strefy,onUpdate:upS}),
+          tab==="szafka"&&h(SzafkaNiebezpiecznych,{data:szafka,onUpdate:upSzafka}),
+          tab==="wozki"&&h(Wozki,{data:wozki,onUpdate:upWo}),
+          tab==="butle"&&h(Butle,{data:butle,onUpdate:upB}),
+          tab==="pracownicy"&&h(Pracownicy,{data:pracownicy,onUpdate:upP,grafik}),
+          tab==="grafik"&&h(GrafikPracy,{pracownicy,grafik,onUpdate:upGrafik}),
+          tab==="planer"&&h(Planer,{kontenery,worki,strefy,done:planerDone,onToggle:upDone}),
+          tab==="notatki"&&h(Notatki,{data:notatki,onAdd:addN}),
+          tab==="historia"&&h(HistoriaRaporty,{kontenery,worki,strefy,wozki,butle,pracownicy,notatki,szafka,snapshots}),
+          tab==="baza"&&h(BazaWiedzy,{data:baza,onAdd:addB,onDelete:delB}),
+          tab==="ai"&&h(AgentAI,{kontenery,worki,strefy,wozki,butle,pracownicy,notatki,baza,snapshots})
+        )
+      );
+    }
+
+    const PASSWORD = "plac2026";
+
+    function Login({onLogin}) {
+      const [pass, setPass] = useState("");
+      const [error, setError] = useState(false);
+      const tryLogin = () => {
+        if(pass === PASSWORD) { onLogin(); }
+        else { setError(true); setTimeout(()=>setError(false), 2000); }
+      };
+      return h('div',{style:{minHeight:"100vh",background:"#0f0f0f",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',sans-serif"}},
+        h('div',{style:{background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"12px",padding:"40px",width:"100%",maxWidth:"360px",textAlign:"center"}},
+          h('div',{style:{color:"#22c55e",fontWeight:"900",fontSize:"22px",letterSpacing:"3px",marginBottom:"8px"}},"PLAC ODPADÓW"),
+          h('div',{style:{color:"#555",fontSize:"14px",marginBottom:"32px"}},"System zarządzania placem"),
+          h('input',{
+            style:{background:"#111",border:`1px solid ${error?"#ef4444":"#333"}`,borderRadius:"6px",color:"#e8e8e8",padding:"12px 16px",fontFamily:"inherit",fontSize:"15px",width:"100%",boxSizing:"border-box",marginBottom:"12px",textAlign:"center",letterSpacing:"4px"},
+            type:"password",placeholder:"Hasło",value:pass,
+            onChange:e=>setPass(e.target.value),
+            onKeyDown:e=>e.key==="Enter"&&tryLogin()
+          }),
+          error&&h('div',{style:{color:"#ef4444",fontSize:"13px",marginBottom:"12px"}},"Nieprawidłowe hasło"),
+          h('button',{
+            style:{background:"rgba(34,197,94,0.15)",border:"1px solid #22c55e",borderRadius:"6px",color:"#22c55e",padding:"12px 24px",cursor:"pointer",fontFamily:"inherit",fontSize:"15px",fontWeight:"600",width:"100%"},
+            onClick:tryLogin
+          },"Wejdź")
+        )
+      );
+    }
+
+    function Root() {
+      const [loggedIn, setLoggedIn] = useState(()=>sessionStorage.getItem("plac_auth")==="1");
+      const login = () => { sessionStorage.setItem("plac_auth","1"); setLoggedIn(true); };
+      return loggedIn ? h(App,null) : h(Login,{onLogin:login});
+    }
+
+    createRoot(document.getElementById('root')).render(h(Root,null));
+  </script>
+</body>
+</html>
